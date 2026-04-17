@@ -11,18 +11,24 @@ use PHPUnit\Framework\Attributes\Test;
 
 class GenerateDocsCommandTest extends TestCase
 {
+    /**
+     * Relative output path (relative to base_path()) used by non-mock tests.
+     * Stored as relative so it can be passed directly to --output.
+     */
     private string $outputPath;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->outputPath = sys_get_temp_dir().'/artisan-docs-test-'.uniqid().'.md';
+        // Relative path inside the project root – keeps us within base_path()
+        // and exercises the resolveSafePath() happy-path in every test.
+        $this->outputPath = 'docs/artisan-docs-test-'.uniqid().'.md';
     }
 
     protected function tearDown(): void
     {
-        if (File::exists($this->outputPath)) {
-            File::delete($this->outputPath);
+        if (File::exists(base_path($this->outputPath))) {
+            File::delete(base_path($this->outputPath));
         }
         parent::tearDown();
     }
@@ -42,7 +48,7 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $this->outputPath,
         ]);
 
-        $this->assertFileExists($this->outputPath);
+        $this->assertFileExists(base_path($this->outputPath));
     }
 
     #[Test]
@@ -52,7 +58,7 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $this->outputPath,
         ]);
 
-        $content = File::get($this->outputPath);
+        $content = File::get(base_path($this->outputPath));
         $this->assertStringContainsString('# Artisan Command Reference', $content);
         $this->assertStringContainsString('## Table of Contents', $content);
     }
@@ -67,13 +73,13 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $jsonPath,
         ])->assertExitCode(0);
 
-        $this->assertFileExists($jsonPath);
-        $decoded = json_decode(File::get($jsonPath), true);
+        $this->assertFileExists(base_path($jsonPath));
+        $decoded = json_decode(File::get(base_path($jsonPath)), true);
         $this->assertNotNull($decoded);
         $this->assertArrayHasKey('title', $decoded);
         $this->assertArrayHasKey('groups', $decoded);
 
-        File::delete($jsonPath);
+        File::delete(base_path($jsonPath));
     }
 
     #[Test]
@@ -84,7 +90,7 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $this->outputPath,
         ])->assertExitCode(0);
 
-        $content = File::get($this->outputPath);
+        $content = File::get(base_path($this->outputPath));
         // All listed commands should be make:* commands
         preg_match_all('/### `([^`]+)`/', $content, $matches);
         foreach ($matches[1] as $commandName) {
@@ -108,7 +114,8 @@ class GenerateDocsCommandTest extends TestCase
     #[Test]
     public function it_check_fails_when_file_is_missing(): void
     {
-        $missingPath = sys_get_temp_dir().'/artisan-docs-nonexistent-'.uniqid().'.md';
+        // A relative path that does not exist on disk yet.
+        $missingPath = 'docs/artisan-docs-nonexistent-'.uniqid().'.md';
 
         $this->artisan('docs:commands', [
             '--output' => $missingPath,
@@ -120,7 +127,8 @@ class GenerateDocsCommandTest extends TestCase
     public function it_check_fails_when_file_is_out_of_sync(): void
     {
         // Write stale content to the file
-        File::put($this->outputPath, '# Stale documentation that is out of date');
+        File::ensureDirectoryExists(base_path(dirname($this->outputPath)));
+        File::put(base_path($this->outputPath), '# Stale documentation that is out of date');
 
         $this->artisan('docs:commands', [
             '--output' => $this->outputPath,
@@ -153,7 +161,7 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $this->outputPath,
         ])->assertExitCode(0);
 
-        $content = File::get($this->outputPath);
+        $content = File::get(base_path($this->outputPath));
         $this->assertStringContainsString('test:hidden-artisan-docs-cmd', $content);
     }
 
@@ -180,7 +188,7 @@ class GenerateDocsCommandTest extends TestCase
             '--output' => $this->outputPath,
         ])->assertExitCode(0);
 
-        $content = File::get($this->outputPath);
+        $content = File::get(base_path($this->outputPath));
         $this->assertStringNotContainsString('test:hidden-artisan-docs-cmd-2', $content);
     }
 
@@ -204,7 +212,7 @@ class GenerateDocsCommandTest extends TestCase
 
         File::shouldReceive('ensureDirectoryExists')->once()->with(dirname($expectedPath));
         File::shouldReceive('put')->once()->with($expectedPath, Mockery::type('string'));
-        // tearDown calls File::exists($this->outputPath) on the mocked facade
+        // tearDown calls File::exists(base_path($this->outputPath)) on the mocked facade
         File::shouldReceive('exists')->andReturn(false);
 
         $this->artisan('docs:commands', ['--output' => 'custom/path.md'])
@@ -219,7 +227,7 @@ class GenerateDocsCommandTest extends TestCase
 
         File::shouldReceive('ensureDirectoryExists')->once()->with(dirname($expectedPath));
         File::shouldReceive('put')->once()->with($expectedPath, Mockery::type('string'));
-        // tearDown calls File::exists($this->outputPath) on the mocked facade
+        // tearDown calls File::exists(base_path($this->outputPath)) on the mocked facade
         File::shouldReceive('exists')->andReturn(false);
 
         $this->artisan('docs:commands', ['--format' => 'json'])
@@ -233,10 +241,96 @@ class GenerateDocsCommandTest extends TestCase
 
         File::shouldReceive('ensureDirectoryExists')->once()->with(dirname($expectedPath));
         File::shouldReceive('put')->once()->with($expectedPath, Mockery::type('string'));
-        // tearDown calls File::exists($this->outputPath) on the mocked facade
+        // tearDown calls File::exists(base_path($this->outputPath)) on the mocked facade
         File::shouldReceive('exists')->andReturn(false);
 
         $this->artisan('docs:commands')
             ->assertExitCode(0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Security: path validation tests
+    // -------------------------------------------------------------------------
+
+    #[Test]
+    public function it_rejects_absolute_unix_output_paths(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => '/tmp/artisan-docs-evil.md',
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_absolute_paths_in_check_mode(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => '/tmp/artisan-docs-evil.md',
+            '--check' => true,
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_stream_wrapper_output_paths(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => 'php://output',
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_phar_stream_wrapper_paths(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => 'phar://some-archive.phar/evil.md',
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_directory_traversal_in_output_path(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => '../../etc/cron.d/artisan-docs',
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_traversal_sequences_embedded_in_the_path(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => 'docs/../../../etc/passwd',
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_rejects_directory_traversal_in_check_mode(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => '../../etc/passwd',
+            '--check' => true,
+        ])->assertExitCode(1);
+    }
+
+    #[Test]
+    public function it_accepts_a_relative_path_within_the_project_root(): void
+    {
+        $this->artisan('docs:commands', [
+            '--output' => $this->outputPath,
+        ])->assertExitCode(0);
+
+        $this->assertFileExists(base_path($this->outputPath));
+    }
+
+    #[Test]
+    public function it_accepts_a_nested_relative_path_without_traversal(): void
+    {
+        $nested = 'docs/sub/artisan-docs-test-'.uniqid().'.md';
+
+        $this->artisan('docs:commands', [
+            '--output' => $nested,
+        ])->assertExitCode(0);
+
+        $this->assertFileExists(base_path($nested));
+
+        File::delete(base_path($nested));
     }
 }

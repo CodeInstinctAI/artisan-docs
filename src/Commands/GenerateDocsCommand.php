@@ -32,10 +32,18 @@ class GenerateDocsCommand extends Command
     public function handle(): int
     {
         $format = $this->option('format') ?: config('artisan-docs.default_format', 'markdown');
-        $output = $this->option('output')
+        $rawOutput = $this->option('output')
             ?? ($this->option('format') !== null ? "docs/commands.{$format}" : null)
             ?? config('artisan-docs.default_output', 'docs/commands.md');
         $title = config('artisan-docs.title', 'Artisan Command Reference');
+
+        try {
+            $resolvedOutput = $this->resolveSafePath($rawOutput);
+        } catch (\InvalidArgumentException $e) {
+            $this->error('❌ Invalid output path: '.$e->getMessage());
+
+            return self::FAILURE;
+        }
 
         $commands = $this->gatherCommands();
 
@@ -50,13 +58,13 @@ class GenerateDocsCommand extends Command
         $content = $generator->generate($groups, $title);
 
         if ($this->option('check')) {
-            return $this->runCheck($content, $output);
+            return $this->runCheck($content, $resolvedOutput);
         }
 
-        $this->writeOutput($content, $output);
+        $this->writeOutput($content, $resolvedOutput);
 
         $total = array_sum(array_map('count', $groups));
-        $this->info("✅ Documentation generated: <comment>{$output}</comment> ({$total} commands, ".count($groups).' groups)');
+        $this->info("✅ Documentation generated: <comment>{$rawOutput}</comment> ({$total} commands, ".count($groups).' groups)');
 
         return self::SUCCESS;
     }
@@ -153,12 +161,51 @@ class GenerateDocsCommand extends Command
         };
     }
 
-    private function writeOutput(string $content, string $path): void
+    /**
+     * Validate and resolve an output path to an absolute path inside base_path().
+     *
+     * Rejects:
+     *   – Stream-wrapper schemes  (e.g. php://, phar://, file://)
+     *   – Absolute paths          (Unix leading slash, Windows drive letters / UNC shares)
+     *   – Directory-traversal     (any ".." segment)
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function resolveSafePath(string $path): string
     {
-        $absolutePath = str_starts_with($path, '/')
-            ? $path
-            : base_path($path);
+        // Reject stream-wrapper schemes (e.g. php://, phar://, file://, compress.zlib://)
+        if (preg_match('#[a-zA-Z][a-zA-Z0-9+\-.]*://#', $path)) {
+            throw new \InvalidArgumentException(
+                "Stream-wrapper schemes are not permitted. Got: \"{$path}\"."
+            );
+        }
 
+        // Reject absolute paths: Unix leading slash, Windows drive letters, UNC shares
+        if (
+            str_starts_with($path, '/')
+            || str_starts_with($path, '\\')
+            || preg_match('/^[a-zA-Z]:[\\\\\/]/', $path)
+        ) {
+            throw new \InvalidArgumentException(
+                'Absolute output paths are not permitted. Use a path relative to the project root. '
+                ."Got: \"{$path}\"."
+            );
+        }
+
+        // Reject directory-traversal sequences
+        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+            if ($segment === '..') {
+                throw new \InvalidArgumentException(
+                    'Directory traversal sequences ("../") are not permitted in the output path.'
+                );
+            }
+        }
+
+        return base_path($path);
+    }
+
+    private function writeOutput(string $content, string $absolutePath): void
+    {
         File::ensureDirectoryExists(dirname($absolutePath));
         File::put($absolutePath, $content);
     }
@@ -167,12 +214,10 @@ class GenerateDocsCommand extends Command
      * Compare generated content against the existing file on disk.
      * Exits with code 1 when the file is missing or differs.
      */
-    private function runCheck(string $content, string $path): int
+    private function runCheck(string $content, string $absolutePath): int
     {
-        $absolutePath = str_starts_with($path, '/') ? $path : base_path($path);
-
         if (! File::exists($absolutePath)) {
-            $this->error("❌ Check failed: documentation file does not exist at [{$path}].");
+            $this->error("❌ Check failed: documentation file does not exist at [{$absolutePath}].");
             $this->line('   Run <comment>php artisan docs:commands</comment> to generate it.');
 
             return self::FAILURE;

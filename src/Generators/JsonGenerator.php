@@ -23,6 +23,18 @@ class JsonGenerator implements GeneratorContract
             ];
         }
 
-        return json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // JSON_HEX_TAG / JSON_HEX_AMP / JSON_HEX_APOS / JSON_HEX_QUOT ensure that
+        // HTML-sensitive characters are unicode-escaped so the output is safe when
+        // embedded in an HTML page or served with an incorrect Content-Type header.
+        return json_encode(
+            $payload,
+            JSON_PRETTY_PRINT
+            | JSON_UNESCAPED_SLASHES
+            | JSON_UNESCAPED_UNICODE
+            | JSON_HEX_TAG
+            | JSON_HEX_AMP
+            | JSON_HEX_APOS
+            | JSON_HEX_QUOT
+        );
     }
 }

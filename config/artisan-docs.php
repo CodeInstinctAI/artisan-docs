@@ -50,12 +50,17 @@ return [
     |--------------------------------------------------------------------------
     |
     | Command namespaces to always exclude from the generated documentation.
-    | Example: ['_', 'completion']
+    | Namespaces for infrastructure tools (Horizon, Telescope, Nova) are
+    | included by default because they often surface internal connection names,
+    | queue names, and worker configuration that should not be published.
     |
     */
     'excluded_namespaces' => [
-        '_',
-        'completion',
+        '_',            // Internal Symfony commands
+        'completion',   // Shell-completion helpers
+        'horizon',      // Laravel Horizon – exposes queue/worker internals
+        'telescope',    // Laravel Telescope – exposes recording configuration
+        'nova',         // Laravel Nova – exposes admin tooling internals
     ],
 
     /*
@@ -64,9 +69,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | Specific command names to always exclude from the generated documentation.
+    | Top-level commands (no namespace prefix) that expose runtime environment
+    | state are listed here by default.
     |
     */
-    'excluded_commands' => [],
+    'excluded_commands' => [
+        'tinker',   // Launches an interactive REPL – not useful to document
+        'env',      // Displays the current application environment label
+    ],
 
     /*
     |--------------------------------------------------------------------------

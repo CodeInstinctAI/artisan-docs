@@ -111,4 +111,101 @@ class JsonGeneratorTest extends TestCase
         // ISO 8601 basic check: contains T and timezone indicator
         $this->assertMatchesRegularExpression('/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/', $decoded['generated_at']);
     }
+
+    // -------------------------------------------------------------------------
+    // Security: HTML-safe encoding flags
+    // -------------------------------------------------------------------------
+
+    #[Test]
+    public function it_hex_encodes_html_angle_brackets_in_output(): void
+    {
+        $groups = [
+            'General' => [
+                [
+                    'name' => 'test:xss',
+                    'description' => '<script>alert(1)</script>',
+                    'help' => '',
+                    'hidden' => false,
+                    'aliases' => [],
+                    'namespace' => 'test',
+                    'group' => 'General',
+                    'arguments' => [],
+                    'options' => [],
+                ],
+            ],
+        ];
+
+        $output = $this->generator->generate($groups, 'Docs');
+
+        // Raw angle brackets must NOT appear – they must be unicode-escaped.
+        $this->assertStringNotContainsString('<script>', $output);
+        $this->assertStringNotContainsString('</script>', $output);
+
+        // The unicode escape sequences produced by JSON_HEX_TAG must be present.
+        $this->assertStringContainsString('\u003C', $output);
+        $this->assertStringContainsString('\u003E', $output);
+
+        // The JSON must still decode successfully and preserve the original value.
+        $decoded = json_decode($output, true);
+        $this->assertNotNull($decoded);
+        $commands = $decoded['groups'][0]['commands'];
+        $this->assertSame('<script>alert(1)</script>', $commands[0]['description']);
+    }
+
+    #[Test]
+    public function it_hex_encodes_ampersands_in_output(): void
+    {
+        $groups = [
+            'General' => [
+                [
+                    'name' => 'test:amp',
+                    'description' => 'Foo & Bar',
+                    'help' => '',
+                    'hidden' => false,
+                    'aliases' => [],
+                    'namespace' => 'test',
+                    'group' => 'General',
+                    'arguments' => [],
+                    'options' => [],
+                ],
+            ],
+        ];
+
+        $output = $this->generator->generate($groups, 'Docs');
+
+        $this->assertStringNotContainsString(' & ', $output);
+        $this->assertStringContainsString('\u0026', $output);
+
+        $decoded = json_decode($output, true);
+        $this->assertSame('Foo & Bar', $decoded['groups'][0]['commands'][0]['description']);
+    }
+
+    #[Test]
+    public function it_produces_valid_json_after_applying_html_safe_flags(): void
+    {
+        $groups = [
+            'General' => [
+                [
+                    'name' => 'test:special',
+                    'description' => '<b>Bold</b> "quoted" & \'apostrophe\'',
+                    'help' => '',
+                    'hidden' => false,
+                    'aliases' => [],
+                    'namespace' => 'test',
+                    'group' => 'General',
+                    'arguments' => [],
+                    'options' => [],
+                ],
+            ],
+        ];
+
+        $output = $this->generator->generate($groups, 'Docs');
+
+        $decoded = json_decode($output, true);
+        $this->assertNotNull($decoded, 'Output must be valid JSON even with HTML-safe flags applied');
+        $this->assertSame(
+            '<b>Bold</b> "quoted" & \'apostrophe\'',
+            $decoded['groups'][0]['commands'][0]['description']
+        );
+    }
 }

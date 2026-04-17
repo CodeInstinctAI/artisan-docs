@@ -73,7 +73,7 @@
             <div class="sidebar-group">
                 <div class="sidebar-group-label">{{ $group }}</div>
                 @foreach($commands as $cmd)
-                    <a class="sidebar-link" href="#{{ str_replace([':', ' '], ['-', '-'], $cmd['name']) }}" title="{{ $cmd['name'] }}">{{ $cmd['name'] }}</a>
+                    <a class="sidebar-link" href="#{{ strtolower(preg_replace('/[^a-z0-9]+/i', '-', $cmd['name'])) }}" title="{{ $cmd['name'] }}">{{ $cmd['name'] }}</a>
                 @endforeach
             </div>
         @endforeach
@@ -90,7 +90,7 @@
                 <h2 class="group-title">{{ $group }}</h2>
 
                 @foreach($commands as $cmd)
-                    <div class="command-card" id="{{ str_replace([':', ' '], ['-', '-'], $cmd['name']) }}">
+                    <div class="command-card" id="{{ strtolower(preg_replace('/[^a-z0-9]+/i', '-', $cmd['name'])) }}">
                         <div class="command-header">
                             <div style="flex:1">
                                 <div class="command-name">{{ $cmd['name'] }}</div>
