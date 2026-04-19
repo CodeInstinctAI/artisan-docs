@@ -5,6 +5,7 @@ namespace CodeInstinct\ArtisanDocs\Tests\Feature;
 use CodeInstinct\ArtisanDocs\Tests\TestCase;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Mockery;
 use PHPUnit\Framework\Attributes\Test;
@@ -27,6 +28,9 @@ class GenerateDocsCommandTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Reset any frozen Carbon time set by individual tests.
+        Carbon::setTestNow();
+
         if (File::exists(base_path($this->outputPath))) {
             File::delete(base_path($this->outputPath));
         }
@@ -332,5 +336,71 @@ class GenerateDocsCommandTest extends TestCase
         $this->assertFileExists(base_path($nested));
 
         File::delete(base_path($nested));
+    }
+
+    // -------------------------------------------------------------------------
+    // --check: timestamp normalisation tests
+    // -------------------------------------------------------------------------
+
+    #[Test]
+    public function it_check_passes_for_markdown_when_only_the_timestamp_has_changed(): void
+    {
+        // Generate the markdown file at time T.
+        Carbon::setTestNow(Carbon::parse('2025-01-01 00:00:00'));
+        $this->artisan('docs:commands', ['--output' => $this->outputPath]);
+
+        // Advance to T + 1 day – the "Auto-generated on …" line will differ,
+        // but the structural content is identical.
+        Carbon::setTestNow(Carbon::parse('2025-01-02 00:00:00'));
+        $this->artisan('docs:commands', [
+            '--output' => $this->outputPath,
+            '--check' => true,
+        ])->assertExitCode(0);
+    }
+
+    #[Test]
+    public function it_check_passes_for_json_when_only_the_timestamp_has_changed(): void
+    {
+        $jsonPath = str_replace('.md', '.json', $this->outputPath);
+
+        // Generate the JSON file at time T.
+        Carbon::setTestNow(Carbon::parse('2025-01-01 00:00:00'));
+        $this->artisan('docs:commands', [
+            '--format' => 'json',
+            '--output' => $jsonPath,
+        ]);
+
+        // Advance time – only "generated_at" will differ.
+        Carbon::setTestNow(Carbon::parse('2025-01-02 00:00:00'));
+        $this->artisan('docs:commands', [
+            '--format' => 'json',
+            '--output' => $jsonPath,
+            '--check' => true,
+        ])->assertExitCode(0);
+
+        File::delete(base_path($jsonPath));
+    }
+
+    #[Test]
+    public function it_check_passes_for_html_when_only_the_timestamp_has_changed(): void
+    {
+        $htmlPath = str_replace('.md', '.html', $this->outputPath);
+
+        // Generate the HTML file at time T.
+        Carbon::setTestNow(Carbon::parse('2025-01-01 00:00:00'));
+        $this->artisan('docs:commands', [
+            '--format' => 'html',
+            '--output' => $htmlPath,
+        ]);
+
+        // Advance time – only the "Generated …" meta suffix will differ.
+        Carbon::setTestNow(Carbon::parse('2025-01-02 00:00:00'));
+        $this->artisan('docs:commands', [
+            '--format' => 'html',
+            '--output' => $htmlPath,
+            '--check' => true,
+        ])->assertExitCode(0);
+
+        File::delete(base_path($htmlPath));
     }
 }

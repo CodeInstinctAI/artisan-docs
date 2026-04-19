@@ -58,7 +58,7 @@ class GenerateDocsCommand extends Command
         $content = $generator->generate($groups, $title);
 
         if ($this->option('check')) {
-            return $this->runCheck($content, $resolvedOutput);
+            return $this->runCheck($content, $resolvedOutput, $format);
         }
 
         $this->writeOutput($content, $resolvedOutput);
@@ -115,7 +115,9 @@ class GenerateDocsCommand extends Command
                 continue;
             }
 
-            // Only-custom filter (overrides vendor filter)
+            // Only-custom filter: restricts output to application-defined commands only
+            // (matched against app_command_paths). Runs independently of the vendor
+            // filter; application commands are never vendor commands.
             if ($onlyCustom && ! $this->inspector->isApplicationCommand($command, $appPaths)) {
                 continue;
             }
@@ -213,8 +215,13 @@ class GenerateDocsCommand extends Command
     /**
      * Compare generated content against the existing file on disk.
      * Exits with code 1 when the file is missing or differs.
+     *
+     * Timestamps embedded by the generators (Markdown blockquote, JSON
+     * "generated_at" field, HTML meta line) are stripped from both strings
+     * before comparison so that --check does not fail solely because the
+     * documentation was generated at an earlier point in time.
      */
-    private function runCheck(string $content, string $absolutePath): int
+    private function runCheck(string $content, string $absolutePath, string $format): int
     {
         if (! File::exists($absolutePath)) {
             $this->error("❌ Check failed: documentation file does not exist at [{$absolutePath}].");
@@ -225,7 +232,10 @@ class GenerateDocsCommand extends Command
 
         $existing = File::get($absolutePath);
 
-        if (trim($existing) === trim($content)) {
+        $normalizedExisting = $this->normalizeForCheck(trim($existing), $format);
+        $normalizedContent = $this->normalizeForCheck(trim($content), $format);
+
+        if ($normalizedExisting === $normalizedContent) {
             $this->info('✅ Documentation is up-to-date.');
 
             return self::SUCCESS;
@@ -235,5 +245,27 @@ class GenerateDocsCommand extends Command
         $this->line('   Run <comment>php artisan docs:commands</comment> to regenerate it.');
 
         return self::FAILURE;
+    }
+
+    /**
+     * Strip format-specific timestamp markers from generated content before
+     * performing an equality check.
+     *
+     * Each generator embeds a live timestamp that changes on every run:
+     *   – Markdown : the "Auto-generated on …" blockquote line
+     *   – JSON     : the "generated_at" top-level property
+     *   – HTML     : the "Generated …" suffix inside the <p class="meta"> element
+     *
+     * Removing these markers allows --check to compare only the structural
+     * content (commands, arguments, options, groups) and pass even when the
+     * documentation file was generated at an earlier time.
+     */
+    private function normalizeForCheck(string $content, string $format): string
+    {
+        return match (strtolower($format)) {
+            'json' => (string) preg_replace('/"generated_at"\s*:\s*"[^"]*",?\n?/', '', $content),
+            'html' => (string) preg_replace('/ &mdash; Generated [^<]+/', '', $content),
+            default => (string) preg_replace('/^> Auto-generated on .+$/m', '', $content),
+        };
     }
 }
