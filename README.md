@@ -63,6 +63,8 @@ php artisan docs:commands --check
 ```
 Exits with code `1` when the committed documentation file does not match the current command structure. Ideal for a CI gate.
 
+Before comparing, `--check` performs **structural normalisation**: it strips format-specific timestamps embedded by each generator — the `> Auto-generated on …` blockquote line in Markdown, the `generated_at` field in JSON, and the generated-time suffix inside the `<p class="meta">` element in HTML — so that a run whose only difference from the committed file is the generation timestamp still passes. Only genuine structural changes (commands added or removed, arguments or options modified) will cause the check to fail.
+
 ---
 
 ## Configuration
@@ -75,12 +77,34 @@ After publishing, edit `config/artisan-docs.php`:
 | `default_output` | `docs/commands.md` | Output file path (relative to base path) |
 | `include_hidden` | `false` | Include hidden commands |
 | `include_vendor` | `true` | Include vendor package commands |
-| `excluded_namespaces` | `['_', 'completion']` | Namespaces to always skip |
+| `excluded_namespaces` | `['_', 'completion', 'horizon', 'telescope', 'nova']` | Namespaces to always skip. `horizon`, `telescope`, and `nova` are excluded by default to prevent exposing internal queue/worker configuration, recording settings, and admin tooling internals. |
 | `excluded_commands` | `[]` | Specific command names to skip |
 | `groups` | *(see config)* | Map namespace → group display name |
 | `app_command_paths` | `['App\\Console\\Commands\\']` | Paths used to detect custom commands |
 | `html_template` | `artisan-docs::commands` | Blade view for HTML output |
 | `title` | `Artisan Command Reference` | Document title |
+
+---
+
+## Security
+
+### Sensitive Data Redaction
+
+`CommandInspector` automatically redacts the default values of any command argument or option whose name matches a sensitive-credential pattern. This prevents secrets that were accidentally set as defaults from leaking into generated documentation.
+
+The following keyword patterns trigger redaction (matched case-insensitively, including compound names such as `db_password` or `api_token`):
+
+| Matched keywords |
+|-----------------|
+| `password`, `passwd` |
+| `secret` |
+| `token` |
+| `api_key`, `api-key`, `apikey` |
+| `auth_key`, `auth-key` |
+| `private_key`, `private-key` |
+| `credential` |
+
+When a match is found, the default value is replaced with the `[ REDACTED ]` placeholder (exposed as `CommandInspector::REDACTED_VALUE`) in all output formats. Arguments and options that have no meaningful default (`null`, `false`, or an empty string) are left untouched.
 
 ---
 
