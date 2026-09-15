@@ -276,7 +276,9 @@ class CommandInspectorTest extends TestCase
             }
         };
 
-        $application->add($command);
+        // Application::add() was removed in Symfony Console 8 (Laravel 13);
+        // setApplication() binds the command on every supported version.
+        $command->setApplication($application);
 
         $meta = $this->inspector->inspect($command);
         $optionNames = array_column($meta['options'], 'name');
